@@ -8,7 +8,7 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
 from TP1.ex1.encryption import get_ECDSA_keys_receiver, get_ECDH_keys, get_public_bytes, \
-    get_ECDSA_EMITTER_public_key
+    get_ECDSA_EMITTER_public_key, get_ECDSA_RECEIVER_public_key, get_ECDSA_keys_emitter
 
 RECEIVER_HOST = "127.0.0.1"
 RECEIVER_PORT = 9000
@@ -18,6 +18,12 @@ async def start_server(host: str, port: int, handler):
     server = await asyncio.start_server(handler, host, port)
 
     return server
+
+
+async def get_connection(host: str, port: int) -> (asyncio.StreamReader, asyncio.StreamWriter):
+    connection = await asyncio.open_connection(host, port)
+
+    return connection
 
 
 async def initialize_session_receiver(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
@@ -76,5 +82,59 @@ async def initialize_session_receiver(reader: asyncio.StreamReader, writer: asyn
     # Split HKDF output into cipher and MAC keys
     cipher_key = hkdf_output[:32]
     mac_key = hkdf_output[32:]
+
+    return cipher_key, mac_key
+
+
+async def initialize_session_emitter(reader, writer):
+    ecdsa_private_key, ecdsa_public_key = await get_ECDSA_keys_emitter()
+
+    ecdh_private_key = ec.generate_private_key(ec.SECP384R1())
+    ecdh_public_key = ecdh_private_key.public_key()
+    print("\tECDH public key:", ecdh_public_key.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo))
+
+    # Sign ECDH public key with ECDSA private key
+    signature = ecdsa_private_key.sign(
+        await get_public_bytes(ecdh_private_key),
+        ec.ECDSA(hashes.SHA256())
+    )
+
+    # Send ECDH public key with signature to the receiver
+    writer.write(signature)
+    await writer.drain()
+
+    writer.write(await get_public_bytes(ecdh_private_key))
+    await writer.drain()
+    print("Emitter's public key sent.")
+
+    # Receive receiver's ECDH public key
+    signature = await reader.read(104)
+    receiver_public_key_bytes = await reader.read(1000)
+    print("Receiver's public key received.")
+    print("Signature:", signature)
+    print("Public key:", receiver_public_key_bytes)
+
+    try:
+        receiver_ECDSA_public_key = await get_ECDSA_RECEIVER_public_key()
+
+        receiver_ECDSA_public_key.verify(signature, receiver_public_key_bytes, ec.ECDSA(hashes.SHA256()))
+        print("Receiver's signature verified.")
+    except InvalidSignature:
+        print("Receiver's signature verification failed.")
+        raise Exception("Man in the middle attack detected!")
+
+    receiver_public_key_bytes = load_pem_public_key(receiver_public_key_bytes)
+    print("\tECDH public key loaded:",
+          receiver_public_key_bytes.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)[:50], "...")
+
+    # Generate shared secret from ECDH key exchange
+    shared_secret = ecdh_private_key.exchange(ec.ECDH(), receiver_public_key_bytes)
+    print("Shared Secret Derived:", shared_secret[:50], "...")
+    print("Shared secret derived.")
+
+    # Derive cipher and MAC keys from shared secret using HKDF
+    hkdf = HKDF(algorithm=hashes.SHA256(), length=64, salt=None, info=b'secret')
+    hkdf_output = hkdf.derive(shared_secret)
+    cipher_key, mac_key = hkdf_output[:32], hkdf_output[32:]
 
     return cipher_key, mac_key
