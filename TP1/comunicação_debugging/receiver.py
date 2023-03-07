@@ -22,7 +22,6 @@ async def start_server(host: str, port: int, handler):
 
 def unpad_message(message: bytes) -> bytes:
     """Unpad message with PKCS7 padding"""
-    print("Padded message:", message)
     unpadder = padding.PKCS7(128).unpadder()
 
     data = unpadder.update(message)
@@ -54,7 +53,7 @@ async def initialize_session(reader: asyncio.StreamReader, writer: asyncio.Strea
 
     # Generate ECDSA key pair
     ecdsa_private_key = ec.generate_private_key(ec.SECP384R1())
-    ecdsa_public_key = ecdsa_private_key.public_key() # TODO: This should be a constant known
+    ecdsa_public_key = ecdsa_private_key.public_key()  # TODO: This should be a constant known
 
     ecdh_private_key = ec.generate_private_key(ec.SECP384R1())
     ecdh_public_key = ecdh_private_key.public_key()
@@ -64,77 +63,67 @@ async def initialize_session(reader: asyncio.StreamReader, writer: asyncio.Strea
 
     # Receive emitter's ECDH public key
     emitter_public_key_bytes = await reader.read(1000)
-
-    print('[RECEIVED] Emitter public key:', emitter_public_key_bytes[:50], "...")
     print("Emitter's public key received.")
 
     # Send ECDH public key to the emitter
     writer.write(ecdh_public_key.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo))
     await writer.drain()
-
     print("Receiver's public key sent.")
-
-    print('[SENT] ECDH public key:',
-          ecdh_public_key.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)[:50], "...")
 
     # Load emitter's public key
     emitter_public_key = load_pem_public_key(emitter_public_key_bytes)
 
     # Generate shared secret from ECDH key exchange
     shared_key = ecdh_private_key.exchange(ec.ECDH(), emitter_public_key)
-
     print("Shared Secret Derived:", shared_key[:2], "...", shared_key[-2:])
     print("Shared secret derived.")
 
     # Derive cipher and MAC keys from shared secret using HKDF
     hkdf = HKDF(algorithm=hashes.SHA256(), length=64, salt=None, info=b'secret')
     hkdf_output = hkdf.derive(shared_key)
-
-    print("HKDF output:", hkdf_output[:2], "...", hkdf_output[-2:])
+    # print("HKDF output:", hkdf_output[:2], "...", hkdf_output[-2:])
     print("HKDF output derived.")
 
     # Split HKDF output into cipher and MAC keys
     cipher_key = hkdf_output[:32]
     mac_key = hkdf_output[32:]
-
-    print("Cipher key:", cipher_key[:2], "...", cipher_key[-2:])
-    print("MAC key:", mac_key[:2], "...", mac_key[-2:])
+    # print("Cipher key:", cipher_key[:2], "...", cipher_key[-2:])
+    # print("MAC key:", mac_key[:2], "...", mac_key[-2:])
 
     return cipher_key, mac_key
 
 
 async def connection_handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
-    cipher_key, mac_key = await initialize_session(reader, writer)
+    while True:
+        cipher_key, mac_key = await initialize_session(reader, writer)
 
-    print("PRIVATE INFORMATION\n", "Cipher Key:", cipher_key, "\nMAC Key:", mac_key)
+        # print("PRIVATE INFORMATION\n", "Cipher Key:", cipher_key, "\nMAC Key:", mac_key)
 
-    # Receive nonce from the emitter
-    nonce = await reader.read(16)
+        # Receive nonce from the emitter
+        nonce = await reader.read(16)
+        print("Nonce received")
 
-    # print("[RECEIVED] Nonce:", nonce[:2], "...", nonce[-2:])
-    print("Nonce received")
+        tag = await reader.read(32)
+        ciphertext = await reader.read(1000)
 
-    tag = await reader.read(32)
-    ciphertext = await reader.read(1000)
+        print('[RECEIVED] Tag:', tag[:2], '...', tag[-2:])
+        print('[RECEIVED] Ciphertext:', ciphertext[:2], '...', ciphertext[-2:])
+        print("Ciphertext length:", len(ciphertext))
+        # print("Tag and ciphertext received.")
 
-    print('[RECEIVED] Tag:', tag[:2], '...', tag[-2:])
-    print('[RECEIVED] Ciphertext:', ciphertext[:2], '...', ciphertext[-2:])
-    print("ciphertext length:", len(ciphertext))
-    print("Tag and ciphertext received.")
+        # Authenticate message with HMAC-SHA256
+        try:
+            verify_message(ciphertext, key=mac_key, nonce=nonce, tag=tag)
+            print("Message authenticated successfully.")
+        except InvalidSignature:
+            print("!!! MESSAGE AUTHENTICATION FAILED !!!")
 
-    # Authenticate message with HMAC-SHA256
-    try:
-        verify_message(ciphertext, key=mac_key, nonce=nonce, tag=tag)
-        # print('[RECEIVED] Message authenticated successfully')
-        print("Message authenticated successfully.")
-    except InvalidSignature:
-        # print('[RECEIVED] !!! Message authentication FAILED !!!')
-        print("!!! MESSAGE AUTHENTICATION FAILED !!!")
+        # Decrypt message with AES-256 in CBC mode
+        plaintext = decrypt_message(ciphertext, cipher_key, nonce)
+        print("Plaintext received: ", plaintext)
 
-    # Decrypt message with AES-256 in CBC mode
-    plaintext = decrypt_message(ciphertext, cipher_key, nonce)
-    # print('[RECEIVED] Decrypted message:', plaintext)
-    print("Plaintext received: ", plaintext)
+        # Send ACK to emitter
+        writer.write(b'ACK')
 
 
 async def main():
