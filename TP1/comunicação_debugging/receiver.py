@@ -102,12 +102,11 @@ async def connection_handler(reader: asyncio.StreamReader, writer: asyncio.Strea
             print("Emitter closed connection.")
             break
 
-        # print("PRIVATE INFORMATION\n", "Cipher Key:", cipher_key, "\nMAC Key:", mac_key)
+        print("-" * 40, "PRIVATE INFORMATION", "-" * 40, "\nCipher Key:", cipher_key, "\nMAC Key:", mac_key)
 
         # Receive nonce from the emitter
         print("-" * 40, "MESSAGE INFO", "-" * 40)
         nonce = await reader.read(16)
-        # print("Nonce received")
         print("Nonce:", nonce[:10], '...', nonce[-10:])
 
         tag = await reader.read(32)
@@ -115,7 +114,7 @@ async def connection_handler(reader: asyncio.StreamReader, writer: asyncio.Strea
 
         print('Tag:', tag[:10], '...', tag[-10:])
         print('Ciphertext:', ciphertext[:10], '...', ciphertext[-10:])
-        # print("Tag and ciphertext received.")
+        print("Tag and ciphertext received.")
         print("-" * 80)
 
         # Authenticate message with HMAC-SHA256
@@ -127,7 +126,8 @@ async def connection_handler(reader: asyncio.StreamReader, writer: asyncio.Strea
 
         # Decrypt message with AES-256 in CBC mode
         plaintext = decrypt_message(ciphertext, cipher_key, nonce)
-        print("Plaintext received: ", plaintext)
+        utf8_plaintext = plaintext.decode("utf-8")
+        print(f"Plaintext received: \"{utf8_plaintext}\"")
 
         # Send ACK to emitter
         writer.write(b'ACK')

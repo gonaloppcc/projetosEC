@@ -1,6 +1,5 @@
 import asyncio
 import os
-import time
 
 from cryptography.hazmat.primitives import hashes, hmac, padding
 from cryptography.hazmat.primitives._serialization import Encoding, PublicFormat
@@ -80,84 +79,72 @@ async def main():
 
     while True:
         message = input("Message: ")
+        message_bytes = message.encode("utf-8")
 
         if message in ["q", "quit", "exit"]:
             writer.close()
             break
 
-        # Generate ECDSA key pair
-        ecdsa_private_key = ec.generate_private_key(ec.SECP384R1())
-        ecdsa_public_key = ecdsa_private_key.public_key()  # TODO: This should be a constant known
-
-        # Generate ECDH (Elliptic-curve Diffie–Hellman) key pair
-        ecdh_private_key = ec.generate_private_key(ec.SECP384R1())
-        ecdh_public_key = ecdh_private_key.public_key()
-
-        print("\tECDH public key:", ecdh_public_key.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo))
-
-        # Send ECDH public key to the receiver
-        writer.write(ecdh_public_key.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo))
-        await writer.drain()
-
-        print("Emitter's public key sent.")
-
-        # Receive receiver's ECDH public key
-        receiver_public_key_bytes = await reader.read(1000)
-
-        print("Receiver's public key received.")
-
-        # Load receiver's public key
-        receiver_public_key = load_pem_public_key(receiver_public_key_bytes)
-
-        print("\tECDH public key loaded:",
-              receiver_public_key.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)[:50], "...")
-
-        # Generate shared secret from ECDH key exchange
-        shared_secret = ecdh_private_key.exchange(ec.ECDH(), receiver_public_key)
-
-        print("Shared Secret Derived:", shared_secret[:50], "...")
-        print("Shared secret derived.")
-
-        # Derive cipher and MAC keys from shared secret using HKDF
-        hkdf = HKDF(algorithm=hashes.SHA256(), length=64, salt=None, info=b'secret')
-        hkdf_output = hkdf.derive(shared_secret)
-        cipher_key, mac_key = hkdf_output[:32], hkdf_output[32:]
-
-        print("PRIVATE INFORMATION")
-        print("\tCipher Key:", cipher_key)
-        print("\tMAC Key:", mac_key)
-
-        # message = "olaaaaaaaaaaaaaaaaaaaaaaa".encode("utf-8")
-
-        message_bytes = message.encode("utf-8")
+        cipher_key, mac_key = await initialize_session(reader, writer)
+        print("PRIVATE INFORMATION", "\n\tCipher Key:", cipher_key, "\n\tMAC Key:", mac_key)
 
         nonce = generate_random_nonce()
 
-        print("\tNonce:", nonce)
-        print("Nonce generated.")
+        print("Nonce:", nonce[:10], '...', nonce[-10:])
 
         writer.write(nonce)
         await writer.drain()
         print("Nonce sent.")
 
         ciphertext, tag, _nonce = authenticate_and_encrypt_message(message_bytes, cipher_key, mac_key, nonce)
-        # tag = b'x' * 32
-        # ciphertext = b'x' * 16
 
-        time.sleep(1)
         # Send encrypted message and authentication tag to the receiver
         writer.write(tag)
         writer.write(ciphertext)
 
-        print("\tTag:", tag[:2], "...", tag[-2:])
-        print("\tCiphertext:", ciphertext[:2], "...", ciphertext[-2:])
-        print("\tCiphertext length:", len(ciphertext))
+        print('Tag:', tag[:10], '...', tag[-10:])
+        print('Ciphertext:', ciphertext[:10], '...', ciphertext[-10:])
         print("\tTag and ciphertext sent.")
 
-        # TODO: Wait for receiver to send back an ack message
         ack = await reader.read(READER_BUFFER_SIZE)
-
         assert ack == b"ACK"
+
+
+async def initialize_session(reader, writer):
+    # Generate ECDSA key pair
+    ecdsa_private_key = ec.generate_private_key(ec.SECP384R1())
+    ecdsa_public_key = ecdsa_private_key.public_key()  # TODO: This should be a constant known
+
+    # Generate ECDH (Elliptic-curve Diffie–Hellman) key pair
+    ecdh_private_key = ec.generate_private_key(ec.SECP384R1())
+    ecdh_public_key = ecdh_private_key.public_key()
+    print("\tECDH public key:", ecdh_public_key.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo))
+
+    # Send ECDH public key to the receiver
+    writer.write(ecdh_public_key.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo))
+    await writer.drain()
+    print("Emitter's public key sent.")
+
+    # Receive receiver's ECDH public key
+    receiver_public_key_bytes = await reader.read(1000)
+    print("Receiver's public key received.")
+
+    # Load receiver's public key
+    receiver_public_key = load_pem_public_key(receiver_public_key_bytes)
+    print("\tECDH public key loaded:",
+          receiver_public_key.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)[:50], "...")
+
+    # Generate shared secret from ECDH key exchange
+    shared_secret = ecdh_private_key.exchange(ec.ECDH(), receiver_public_key)
+    print("Shared Secret Derived:", shared_secret[:50], "...")
+    print("Shared secret derived.")
+
+    # Derive cipher and MAC keys from shared secret using HKDF
+    hkdf = HKDF(algorithm=hashes.SHA256(), length=64, salt=None, info=b'secret')
+    hkdf_output = hkdf.derive(shared_secret)
+    cipher_key, mac_key = hkdf_output[:32], hkdf_output[32:]
+
+    return cipher_key, mac_key
 
 
 if __name__ == "__main__":
