@@ -96,7 +96,11 @@ async def initialize_session(reader: asyncio.StreamReader, writer: asyncio.Strea
 async def connection_handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     while True:
         print("-" * 40, "CONNECTION INFO", "-" * 40)
-        cipher_key, mac_key = await initialize_session(reader, writer)
+        try:
+            cipher_key, mac_key = await initialize_session(reader, writer)
+        except ValueError:
+            print("Emitter closed connection.")
+            break
 
         # print("PRIVATE INFORMATION\n", "Cipher Key:", cipher_key, "\nMAC Key:", mac_key)
 

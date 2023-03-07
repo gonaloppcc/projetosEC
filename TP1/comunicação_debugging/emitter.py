@@ -79,6 +79,12 @@ async def main():
     # TODO: Implement ECDSA !!!
 
     while True:
+        message = input("Message: ")
+
+        if message in ["q", "quit", "exit"]:
+            writer.close()
+            break
+
         # Generate ECDSA key pair
         ecdsa_private_key = ec.generate_private_key(ec.SECP384R1())
         ecdsa_public_key = ecdsa_private_key.public_key()  # TODO: This should be a constant known
@@ -121,14 +127,9 @@ async def main():
         print("\tCipher Key:", cipher_key)
         print("\tMAC Key:", mac_key)
 
-        # message = input("Message: ").encode("utf-8")
+        # message = "olaaaaaaaaaaaaaaaaaaaaaaa".encode("utf-8")
 
-        # TODO: Uncomment this section
-
-        message = "olaaaaaaaaaaaaaaaaaaaaaaa".encode("utf-8")
-
-        if message in ["q", "quit", "exit"]:
-            writer.close()
+        message_bytes = message.encode("utf-8")
 
         nonce = generate_random_nonce()
 
@@ -139,7 +140,7 @@ async def main():
         await writer.drain()
         print("Nonce sent.")
 
-        ciphertext, tag, _nonce = authenticate_and_encrypt_message(message, cipher_key, mac_key, nonce)
+        ciphertext, tag, _nonce = authenticate_and_encrypt_message(message_bytes, cipher_key, mac_key, nonce)
         # tag = b'x' * 32
         # ciphertext = b'x' * 16
 
