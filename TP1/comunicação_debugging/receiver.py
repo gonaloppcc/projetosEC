@@ -58,8 +58,8 @@ async def initialize_session(reader: asyncio.StreamReader, writer: asyncio.Strea
     ecdh_private_key = ec.generate_private_key(ec.SECP384R1())
     ecdh_public_key = ecdh_private_key.public_key()
 
-    print("ECDH public key:",
-          ecdh_public_key.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo))
+    # print("ECDH public key:",
+    #      ecdh_public_key.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo))
 
     # Receive emitter's ECDH public key
     emitter_public_key_bytes = await reader.read(1000)
@@ -75,7 +75,7 @@ async def initialize_session(reader: asyncio.StreamReader, writer: asyncio.Strea
 
     # Generate shared secret from ECDH key exchange
     shared_key = ecdh_private_key.exchange(ec.ECDH(), emitter_public_key)
-    print("Shared Secret Derived:", shared_key[:2], "...", shared_key[-2:])
+    # print("Shared Secret Derived:", shared_key[:2], "...", shared_key[-2:])
     print("Shared secret derived.")
 
     # Derive cipher and MAC keys from shared secret using HKDF
@@ -95,21 +95,24 @@ async def initialize_session(reader: asyncio.StreamReader, writer: asyncio.Strea
 
 async def connection_handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     while True:
+        print("-" * 40, "CONNECTION INFO", "-" * 40)
         cipher_key, mac_key = await initialize_session(reader, writer)
 
         # print("PRIVATE INFORMATION\n", "Cipher Key:", cipher_key, "\nMAC Key:", mac_key)
 
         # Receive nonce from the emitter
+        print("-" * 40, "MESSAGE INFO", "-" * 40)
         nonce = await reader.read(16)
-        print("Nonce received")
+        # print("Nonce received")
+        print("Nonce:", nonce[:10], '...', nonce[-10:])
 
         tag = await reader.read(32)
         ciphertext = await reader.read(1000)
 
-        print('[RECEIVED] Tag:', tag[:2], '...', tag[-2:])
-        print('[RECEIVED] Ciphertext:', ciphertext[:2], '...', ciphertext[-2:])
-        print("Ciphertext length:", len(ciphertext))
+        print('Tag:', tag[:10], '...', tag[-10:])
+        print('Ciphertext:', ciphertext[:10], '...', ciphertext[-10:])
         # print("Tag and ciphertext received.")
+        print("-" * 80)
 
         # Authenticate message with HMAC-SHA256
         try:
